@@ -6,12 +6,23 @@ A simple CLI tool to convert PDF files to Markdown using Docling
 
 import sys
 import os
+import shutil
 import subprocess
 import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
 from docling.document_converter import DocumentConverter
+
+
+def _pandoc() -> str:
+    path = shutil.which("pandoc")
+    if not path:
+        raise RuntimeError(
+            "pandoc not found. Install it with: brew install pandoc  (macOS) "
+            "or: sudo apt install pandoc  (Debian/Ubuntu)"
+        )
+    return path
 
 
 def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, converter: DocumentConverter = None) -> str:
@@ -64,7 +75,7 @@ def convert_docx_to_markdown(docx_path: str, output_path: str = None) -> str:
 
     print(f"Converting: {docx_path}")
     result = subprocess.run(
-        ["/opt/homebrew/bin/pandoc", str(docx_path), "-o", str(output_path),
+        [_pandoc(), str(docx_path), "-o", str(output_path),
          "--wrap=none", "--markdown-headings=atx"],
         capture_output=True, text=True
     )

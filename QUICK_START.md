@@ -3,7 +3,7 @@
 ## Setup (One-Time)
 
 ```bash
-cd /Users/dsa/projects/pdf-to-markdown
+cd /path/to/pdf-to-markdown
 source venv/bin/activate
 ```
 
@@ -11,13 +11,13 @@ source venv/bin/activate
 
 ```bash
 # Convert a single PDF
-python pdf2md input.pdf output.md
+./pdf2md input.pdf output.md
 
 # Auto-name output file
-python pdf2md input.pdf
+./pdf2md input.pdf
 
 # Convert ALL PDFs in a folder (batch mode)
-python pdf2md --batch input/
+./pdf2md --batch input/
 ```
 
 ## Common Commands
@@ -33,7 +33,7 @@ deactivate
 pip install -r requirements.txt
 
 # Test with sample
-python pdf2md input/test.pdf output/test.md
+./pdf2md input/test.pdf output/test.md
 ```
 
 ## File Structure

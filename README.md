@@ -75,7 +75,7 @@ source venv/bin/activate
 ./serve
 ```
 
-Then open `http://localhost:8000` in your browser for a drag-and-drop interface.
+Then open `http://localhost:8765` in your browser for a drag-and-drop interface.
 
 ## Optional: Add to PATH
 
@@ -94,7 +94,6 @@ pdf2md ~/Downloads/paper.pdf ~/Documents/paper.md
 | `docling` | PDF parsing and Markdown export |
 | `fastapi` + `uvicorn` | Web UI server |
 | `python-multipart` | File upload handling |
-| `tabulate` | Table formatting |
 | `pandoc` (system) | DOCX conversion |
 
 ## Notes

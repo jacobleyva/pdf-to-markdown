@@ -8,6 +8,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -31,6 +32,25 @@ STATIC_DIR = Path(__file__).parent / "static"
 JOBS_DIR = Path(tempfile.gettempdir()) / "pdf2md_jobs"
 JOBS_DIR.mkdir(exist_ok=True)
 
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB per file
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+
+
+def _validate_job_id(job_id: str) -> None:
+    if not _UUID_RE.match(job_id):
+        raise HTTPException(400, "Invalid job ID")
+
+
+def _pandoc() -> str:
+    path = shutil.which("pandoc")
+    if not path:
+        raise RuntimeError(
+            "pandoc not found. Install it with: brew install pandoc  (macOS) "
+            "or: sudo apt install pandoc  (Debian/Ubuntu)"
+        )
+    return path
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -41,19 +61,24 @@ async def index():
 
 @app.post("/upload")
 async def upload(files: list[UploadFile] = File(...)):
-    """Accept one or more PDF files, kick off conversion, return job_id."""
+    """Accept one or more PDF/DOCX files, kick off conversion, return job_id."""
     job_id = str(uuid.uuid4())
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True)
 
     file_list = []
     for f in files:
-        if not f.filename.lower().endswith((".pdf", ".docx")):
+        safe_name = Path(f.filename).name  # basename only — strip any path components
+        if not safe_name.lower().endswith((".pdf", ".docx")):
             raise HTTPException(400, f"{f.filename} is not a supported file type (PDF or DOCX)")
-        dest = job_dir / f.filename
+
         content = await f.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, f"{f.filename} exceeds 50 MB limit")
+
+        dest = job_dir / safe_name
         dest.write_bytes(content)
-        file_list.append(f.filename)
+        file_list.append(safe_name)
 
     jobs[job_id] = {
         "files": file_list,
@@ -61,8 +86,8 @@ async def upload(files: list[UploadFile] = File(...)):
         "done": False,
     }
 
-    # Kick off background conversion
-    asyncio.get_event_loop().run_in_executor(executor, _convert_job, job_id, job_dir)
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(executor, _convert_job, job_id, job_dir)
 
     return {"job_id": job_id, "files": file_list}
 
@@ -89,7 +114,7 @@ def _convert_job(job_id: str, job_dir: Path):
             elif suffix == ".docx":
                 prog["pct"] = 20
                 sp = subprocess.run(
-                    ["/opt/homebrew/bin/pandoc", str(pdf_path), "-o", str(md_path),
+                    [_pandoc(), str(pdf_path), "-o", str(md_path),
                      "--wrap=none", "--markdown-headings=atx"],
                     capture_output=True, text=True
                 )
@@ -114,6 +139,7 @@ def _convert_job(job_id: str, job_dir: Path):
 @app.get("/progress/{job_id}")
 async def progress(job_id: str):
     """Server-Sent Events stream for conversion progress."""
+    _validate_job_id(job_id)
     if job_id not in jobs:
         raise HTTPException(404, "Job not found")
 
@@ -134,15 +160,24 @@ async def progress(job_id: str):
 @app.get("/download/{job_id}/{filename}")
 async def download_file(job_id: str, filename: str):
     """Download a single converted .md file."""
-    file_path = JOBS_DIR / job_id / filename
+    _validate_job_id(job_id)
+    safe_name = Path(filename).name  # strip any path components from filename
+    file_path = (JOBS_DIR / job_id / safe_name).resolve()
+
+    # Ensure resolved path stays inside the job directory
+    job_dir_resolved = (JOBS_DIR / job_id).resolve()
+    if not str(file_path).startswith(str(job_dir_resolved) + os.sep):
+        raise HTTPException(404, "File not found")
+
     if not file_path.exists() or file_path.suffix != ".md":
         raise HTTPException(404, "File not found")
-    return FileResponse(str(file_path), media_type="text/markdown", filename=filename)
+    return FileResponse(str(file_path), media_type="text/markdown", filename=safe_name)
 
 
 @app.get("/download-all/{job_id}")
 async def download_all(job_id: str):
     """Download all converted .md files as a ZIP archive."""
+    _validate_job_id(job_id)
     job_dir = JOBS_DIR / job_id
     if not job_dir.exists():
         raise HTTPException(404, "Job not found")
@@ -167,6 +202,7 @@ async def download_all(job_id: str):
 @app.delete("/job/{job_id}")
 async def delete_job(job_id: str):
     """Clean up job files."""
+    _validate_job_id(job_id)
     job_dir = JOBS_DIR / job_id
     if job_dir.exists():
         shutil.rmtree(job_dir)
