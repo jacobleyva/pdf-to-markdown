@@ -7,7 +7,6 @@ FastAPI server using Docling for PDF conversion.
 import asyncio
 import io
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -32,8 +31,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 JOBS_DIR = Path(tempfile.gettempdir()) / "pdf2md_jobs"
 JOBS_DIR.mkdir(exist_ok=True)
 
-MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB per file
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_UPLOAD_MB = MAX_UPLOAD_BYTES // (1024 * 1024)
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+_PANDOC_PATH: str | None = None
 
 
 def _validate_job_id(job_id: str) -> None:
@@ -42,13 +43,15 @@ def _validate_job_id(job_id: str) -> None:
 
 
 def _pandoc() -> str:
-    path = shutil.which("pandoc")
-    if not path:
-        raise RuntimeError(
-            "pandoc not found. Install it with: brew install pandoc  (macOS) "
-            "or: sudo apt install pandoc  (Debian/Ubuntu)"
-        )
-    return path
+    global _PANDOC_PATH
+    if _PANDOC_PATH is None:
+        _PANDOC_PATH = shutil.which("pandoc")
+        if not _PANDOC_PATH:
+            raise RuntimeError(
+                "pandoc not found. Install it with: brew install pandoc  (macOS) "
+                "or: sudo apt install pandoc  (Debian/Ubuntu)"
+            )
+    return _PANDOC_PATH
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -68,13 +71,13 @@ async def upload(files: list[UploadFile] = File(...)):
 
     file_list = []
     for f in files:
-        safe_name = Path(f.filename).name  # basename only — strip any path components
+        safe_name = Path(f.filename).name
         if not safe_name.lower().endswith((".pdf", ".docx")):
             raise HTTPException(400, f"{f.filename} is not a supported file type (PDF or DOCX)")
 
         content = await f.read()
         if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, f"{f.filename} exceeds 50 MB limit")
+            raise HTTPException(413, f"{f.filename} exceeds {MAX_UPLOAD_MB} MB limit")
 
         dest = job_dir / safe_name
         dest.write_bytes(content)
@@ -161,12 +164,9 @@ async def progress(job_id: str):
 async def download_file(job_id: str, filename: str):
     """Download a single converted .md file."""
     _validate_job_id(job_id)
-    safe_name = Path(filename).name  # strip any path components from filename
+    safe_name = Path(filename).name
     file_path = (JOBS_DIR / job_id / safe_name).resolve()
-
-    # Ensure resolved path stays inside the job directory
-    job_dir_resolved = (JOBS_DIR / job_id).resolve()
-    if not str(file_path).startswith(str(job_dir_resolved) + os.sep):
+    if not file_path.is_relative_to((JOBS_DIR / job_id).resolve()):
         raise HTTPException(404, "File not found")
 
     if not file_path.exists() or file_path.suffix != ".md":

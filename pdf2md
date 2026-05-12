@@ -15,14 +15,19 @@ from pathlib import Path
 from docling.document_converter import DocumentConverter
 
 
+_PANDOC_PATH: str | None = None
+
+
 def _pandoc() -> str:
-    path = shutil.which("pandoc")
-    if not path:
-        raise RuntimeError(
-            "pandoc not found. Install it with: brew install pandoc  (macOS) "
-            "or: sudo apt install pandoc  (Debian/Ubuntu)"
-        )
-    return path
+    global _PANDOC_PATH
+    if _PANDOC_PATH is None:
+        _PANDOC_PATH = shutil.which("pandoc")
+        if not _PANDOC_PATH:
+            raise RuntimeError(
+                "pandoc not found. Install it with: brew install pandoc  (macOS) "
+                "or: sudo apt install pandoc  (Debian/Ubuntu)"
+            )
+    return _PANDOC_PATH
 
 
 def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, converter: DocumentConverter = None) -> str:
