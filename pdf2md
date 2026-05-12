@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""
+PDF to Markdown Converter
+A simple CLI tool to convert PDF files to Markdown using Docling
+"""
+
+import sys
+import os
+import subprocess
+import hashlib
+import json
+from datetime import datetime
+from pathlib import Path
+from docling.document_converter import DocumentConverter
+
+
+def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, converter: DocumentConverter = None) -> str:
+    """
+    Convert a single PDF file to Markdown format.
+
+    Args:
+        pdf_path: Path to the input PDF file
+        output_path: Optional path for output .md file (defaults to same name as PDF)
+        converter: Optional pre-initialized DocumentConverter (reuse in batch mode)
+
+    Returns:
+        Path to the generated markdown file
+    """
+    if not os.path.exists(pdf_path):
+        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+    print(f"Converting: {pdf_path}")
+    if converter is None:
+        converter = DocumentConverter()
+    result = converter.convert(pdf_path)
+    md_text = result.document.export_to_markdown()
+
+    if output_path is None:
+        output_path = Path(pdf_path).with_suffix('.md')
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(md_text)
+
+    print(f"Done: {output_path}  ({len(md_text):,} characters)")
+    return str(output_path)
+
+
+def convert_docx_to_markdown(docx_path: str, output_path: str = None) -> str:
+    """
+    Convert a single DOCX file to Markdown format using pandoc.
+
+    Args:
+        docx_path: Path to the input .docx file
+        output_path: Optional path for output .md file (defaults to same name as docx)
+
+    Returns:
+        Path to the generated markdown file
+    """
+    if not os.path.exists(docx_path):
+        raise FileNotFoundError(f"DOCX file not found: {docx_path}")
+
+    if output_path is None:
+        output_path = Path(docx_path).with_suffix('.md')
+
+    print(f"Converting: {docx_path}")
+    result = subprocess.run(
+        ["/opt/homebrew/bin/pandoc", str(docx_path), "-o", str(output_path),
+         "--wrap=none", "--markdown-headings=atx"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"pandoc failed: {result.stderr}")
+
+    md_text = Path(output_path).read_text(encoding='utf-8')
+    print(f"Done: {output_path}  ({len(md_text):,} characters)")
+    return str(output_path)
+
+
+def batch_convert(input_dir: str, output_dir: str = None, force: bool = False) -> None:
+    """
+    Convert all PDFs in a directory to Markdown.
+
+    Args:
+        input_dir: Path to directory containing PDF files
+        output_dir: Optional path for output directory (defaults to output/ next to input)
+        force: If True, reconvert all files ignoring the manifest
+    """
+    input_path = Path(input_dir)
+    if not input_path.is_dir():
+        raise NotADirectoryError(f"Not a directory: {input_dir}")
+
+    docs = sorted(list(input_path.glob("*.pdf")) + list(input_path.glob("*.docx")))
+    if not docs:
+        print(f"No PDF or DOCX files found in: {input_dir}")
+        sys.exit(0)
+
+    if output_dir:
+        output_dir = Path(output_dir)
+    else:
+        output_dir = input_path.parent / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest_path = output_dir / ".pdf2md_manifest.json"
+    manifest = {}
+    if not force and manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    total = len(docs)
+    succeeded = 0
+    skipped = 0
+    failed = 0
+
+    print(f"\nBatch mode: {total} file(s) found in '{input_dir}'")
+    print(f"Output folder: {output_dir}\n")
+
+    converter = DocumentConverter()
+
+    for i, doc_path in enumerate(docs, start=1):
+        print(f"[{i}/{total}] {doc_path.name}")
+        output_path = output_dir / doc_path.with_suffix('.md').name
+
+        file_hash = None
+        if not force and doc_path.name in manifest and output_path.exists():
+            file_hash = hashlib.sha256(doc_path.read_bytes()).hexdigest()
+            if manifest[doc_path.name]["sha256"] == file_hash:
+                print(f"  [skip] already converted — use --force to reconvert\n")
+                skipped += 1
+                continue
+
+        try:
+            suffix = doc_path.suffix.lower()
+            if suffix == '.pdf':
+                convert_pdf_to_markdown(str(doc_path), str(output_path), converter=converter)
+            elif suffix == '.docx':
+                convert_docx_to_markdown(str(doc_path), str(output_path))
+            if file_hash is None:
+                file_hash = hashlib.sha256(doc_path.read_bytes()).hexdigest()
+            manifest[doc_path.name] = {"sha256": file_hash, "converted_at": datetime.now().isoformat()}
+            succeeded += 1
+        except Exception as e:
+            print(f"  Failed: {e}")
+            failed += 1
+        print()
+
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    print("─" * 40)
+    print(f"Batch complete: {succeeded} converted, {skipped} skipped, {failed} failed")
+    print(f"Output folder: {output_dir}")
+
+
+def main():
+    """Main CLI entry point"""
+    args = sys.argv[1:]
+
+    if not args:
+        print("Usage:")
+        print("  pdf2md <input.pdf|input.docx> [output.md]         # Convert a single file")
+        print("  pdf2md --batch <folder/>                          # Convert all PDFs and DOCXs in a folder")
+        print("  pdf2md --batch <folder/> --output <out_folder/>   # Batch with custom output dir")
+        print("  pdf2md --batch <folder/> --force                  # Reconvert all, ignore manifest")
+        print("\nExamples:")
+        print("  pdf2md document.pdf                               # Creates document.md")
+        print("  pdf2md report.docx                                # Creates report.md")
+        print("  pdf2md document.pdf custom.md                     # Creates custom.md")
+        print("  pdf2md --batch input/                             # Converts all PDFs and DOCXs in input/")
+        print("  pdf2md --batch ~/oracle-pdfs/ --output ~/pai-workspace/oracle-hcm/docs/")
+        sys.exit(1)
+
+    if args[0] == "--batch":
+        if len(args) < 2:
+            print("Error: --batch requires a folder path")
+            print("  Usage: pdf2md --batch <folder/> [--output <out_folder/>] [--force]")
+            sys.exit(1)
+        input_dir = args[1]
+        output_dir = None
+        force = "--force" in args
+        if "--output" in args:
+            idx = args.index("--output")
+            if idx + 1 >= len(args):
+                print("Error: --output requires a folder path")
+                sys.exit(1)
+            output_dir = args[idx + 1]
+        try:
+            batch_convert(input_dir, output_dir, force=force)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        input_path = args[0]
+        output_path = args[1] if len(args) > 1 else None
+        suffix = Path(input_path).suffix.lower()
+        try:
+            if suffix == '.pdf':
+                convert_pdf_to_markdown(input_path, output_path)
+            elif suffix in ('.docx', '.doc'):
+                convert_docx_to_markdown(input_path, output_path)
+            else:
+                print(f"Error: Unsupported file type '{suffix}'. Supported: .pdf, .docx")
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

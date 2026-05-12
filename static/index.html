@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF to Markdown</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3250;
+      --accent: #4f7cff;
+      --accent-hover: #6b93ff;
+      --success: #34d399;
+      --error: #f87171;
+      --warn: #fbbf24;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 24px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    header h1 span { color: var(--accent); }
+
+    header p {
+      color: var(--muted);
+      margin-top: 8px;
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      width: 100%;
+      max-width: 720px;
+    }
+
+    /* Drop zone */
+    #drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 48px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(79, 124, 255, 0.06);
+    }
+
+    #drop-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .drop-icon {
+      font-size: 2.5rem;
+      margin-bottom: 12px;
+    }
+
+    #drop-zone h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    #drop-zone p {
+      color: var(--muted);
+      font-size: 0.875rem;
+    }
+
+    #drop-zone .browse-link {
+      color: var(--accent);
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:not(:disabled):hover { background: var(--accent-hover); }
+
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:not(:disabled):hover { background: #2a2f4a; }
+
+    .btn-success {
+      background: rgba(52, 211, 153, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(52, 211, 153, 0.3);
+    }
+    .btn-success:not(:disabled):hover { background: rgba(52, 211, 153, 0.25); }
+
+    /* File list */
+    #file-list {
+      margin-top: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .file-item {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .file-info { min-width: 0; }
+
+    .file-name {
+      font-size: 0.9rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .file-meta {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* Progress bar */
+    .progress-wrap {
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.3s ease;
+      background: var(--accent);
+    }
+
+    .progress-bar.done { background: var(--success); }
+    .progress-bar.error { background: var(--error); }
+
+    .status-badge {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 99px;
+      white-space: nowrap;
+    }
+
+    .badge-pending  { background: rgba(100,116,139,0.2); color: var(--muted); }
+    .badge-converting { background: rgba(79,124,255,0.15); color: var(--accent); }
+    .badge-done     { background: rgba(52,211,153,0.15); color: var(--success); }
+    .badge-error    { background: rgba(248,113,113,0.15); color: var(--error); }
+
+    .download-btn {
+      background: none;
+      border: 1px solid var(--success);
+      color: var(--success);
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .download-btn:hover { background: rgba(52,211,153,0.1); }
+
+    /* Summary bar */
+    #summary {
+      display: none;
+      margin-top: 20px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      background: rgba(52,211,153,0.08);
+      border: 1px solid rgba(52,211,153,0.2);
+      font-size: 0.875rem;
+      color: var(--success);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    #summary.hidden { display: none !important; }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 24px 0;
+    }
+
+    footer {
+      margin-top: 32px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>PDF <span>to Markdown</span></h1>
+  <p>Drop one or many PDFs or Word docs — get clean Markdown back.</p>
+</header>
+
+<div class="card">
+
+  <div id="drop-zone">
+    <input type="file" id="file-input" accept=".pdf,.docx" multiple />
+    <div class="drop-icon">&#x1F4C4;</div>
+    <h2>Drag &amp; drop PDF or DOCX files here</h2>
+    <p>or <span class="browse-link">browse to select</span> &mdash; single or bulk</p>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-primary" id="convert-btn" disabled>Convert</button>
+    <button class="btn btn-secondary" id="clear-btn" disabled>Clear</button>
+  </div>
+
+  <div id="file-list"></div>
+
+  <div id="summary" class="hidden">
+    <span id="summary-text"></span>
+    <button class="btn btn-success" id="download-all-btn">Download all as ZIP</button>
+  </div>
+
+</div>
+
+<footer>
+  Powered by <strong>PyMuPDF4LLM</strong> + <strong>pandoc</strong> &mdash; converts locally, nothing leaves your machine.
+</footer>
+
+<script>
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  const fileList = document.getElementById('file-list');
+  const convertBtn = document.getElementById('convert-btn');
+  const clearBtn = document.getElementById('clear-btn');
+  const summary = document.getElementById('summary');
+  const summaryText = document.getElementById('summary-text');
+  const downloadAllBtn = document.getElementById('download-all-btn');
+
+  let pendingFiles = [];   // Files staged but not yet uploaded
+  let currentJobId = null;
+  let eventSource = null;
+
+  // ── Drag & drop ──────────────────────────────────────────────────────────
+  dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+  });
+
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    addFiles([...e.dataTransfer.files].filter(f => f.name.toLowerCase().endsWith('.pdf') || f.name.toLowerCase().endsWith('.docx')));
+  });
+
+  fileInput.addEventListener('change', () => {
+    addFiles([...fileInput.files]);
+    fileInput.value = '';
+  });
+
+  // ── File staging ──────────────────────────────────────────────────────────
+  function addFiles(files) {
+    files.forEach(f => {
+      if (!pendingFiles.find(p => p.name === f.name)) pendingFiles.push(f);
+    });
+    renderStagedList();
+  }
+
+  function renderStagedList() {
+    fileList.innerHTML = '';
+    pendingFiles.forEach(f => {
+      const item = makeFileItem(f.name, formatBytes(f.size));
+      item.dataset.filename = f.name;
+      fileList.appendChild(item);
+    });
+    convertBtn.disabled = pendingFiles.length === 0;
+    clearBtn.disabled   = pendingFiles.length === 0;
+    summary.classList.add('hidden');
+    currentJobId = null;
+  }
+
+  function makeFileItem(name, meta) {
+    const div = document.createElement('div');
+    div.className = 'file-item';
+    div.innerHTML = `
+      <div class="file-info">
+        <div class="file-name">${escHtml(name)}</div>
+        <div class="file-meta">${escHtml(meta)}</div>
+        <div class="progress-wrap"><div class="progress-bar" style="width:0%"></div></div>
+      </div>
+      <span class="status-badge badge-pending">pending</span>
+    `;
+    return div;
+  }
+
+  // ── Convert ──────────────────────────────────────────────────────────────
+  convertBtn.addEventListener('click', async () => {
+    if (!pendingFiles.length) return;
+
+    convertBtn.disabled = true;
+    clearBtn.disabled   = true;
+    summary.classList.add('hidden');
+
+    const form = new FormData();
+    pendingFiles.forEach(f => form.append('files', f));
+
+    let res;
+    try {
+      res = await fetch('/upload', { method: 'POST', body: form });
+    } catch (err) {
+      alert('Upload failed: ' + err.message);
+      convertBtn.disabled = false;
+      clearBtn.disabled   = false;
+      return;
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+      alert('Error: ' + (err.detail || res.statusText));
+      convertBtn.disabled = false;
+      clearBtn.disabled   = false;
+      return;
+    }
+
+    const { job_id } = await res.json();
+    currentJobId = job_id;
+    listenToProgress(job_id);
+  });
+
+  // ── SSE progress ─────────────────────────────────────────────────────────
+  function listenToProgress(jobId) {
+    if (eventSource) eventSource.close();
+    eventSource = new EventSource(`/progress/${jobId}`);
+
+    eventSource.onmessage = e => {
+      const { progress, done } = JSON.parse(e.data);
+      updateFileItems(progress);
+      if (done) {
+        eventSource.close();
+        showSummary(progress, jobId);
+        clearBtn.disabled = false;
+      }
+    };
+
+    eventSource.onerror = () => {
+      eventSource.close();
+      clearBtn.disabled = false;
+    };
+  }
+
+  function updateFileItems(progress) {
+    Object.entries(progress).forEach(([filename, info]) => {
+      const item = [...fileList.querySelectorAll('.file-item')]
+        .find(el => el.dataset.filename === filename);
+      if (!item) return;
+
+      const bar    = item.querySelector('.progress-bar');
+      const badge  = item.querySelector('.status-badge');
+      const meta   = item.querySelector('.file-meta');
+
+      bar.style.width = info.pct + '%';
+
+      if (info.status === 'done') {
+        bar.classList.add('done');
+        badge.textContent = 'done';
+        badge.className   = 'status-badge badge-done';
+        if (info.chars) meta.textContent = formatNum(info.chars) + ' characters';
+
+        // Add per-file download button
+        if (!item.querySelector('.download-btn')) {
+          const btn = document.createElement('button');
+          btn.className = 'download-btn';
+          btn.textContent = 'Download';
+          btn.addEventListener('click', () => downloadFile(currentJobId, info.output));
+          item.appendChild(btn);
+          item.querySelector('.status-badge').remove();
+        }
+      } else if (info.status === 'error') {
+        bar.classList.add('error');
+        bar.style.width = '100%';
+        badge.textContent = 'error';
+        badge.className   = 'status-badge badge-error';
+        meta.textContent  = info.error || 'Conversion failed';
+      } else if (info.status === 'converting') {
+        badge.textContent = 'converting...';
+        badge.className   = 'status-badge badge-converting';
+      }
+    });
+  }
+
+  function showSummary(progress, jobId) {
+    const total   = Object.keys(progress).length;
+    const success = Object.values(progress).filter(p => p.status === 'done').length;
+    const failed  = total - success;
+
+    let msg = `${success} of ${total} file${total !== 1 ? 's' : ''} converted`;
+    if (failed) msg += ` &mdash; ${failed} failed`;
+    summaryText.innerHTML = msg;
+
+    if (success > 0) {
+      downloadAllBtn.onclick = () => downloadAll(jobId);
+      summary.classList.remove('hidden');
+    }
+  }
+
+  // ── Downloads ─────────────────────────────────────────────────────────────
+  function downloadFile(jobId, filename) {
+    const a = document.createElement('a');
+    a.href = `/download/${jobId}/${encodeURIComponent(filename)}`;
+    a.download = filename;
+    a.click();
+  }
+
+  function downloadAll(jobId) {
+    const a = document.createElement('a');
+    a.href = `/download-all/${jobId}`;
+    a.download = 'converted.zip';
+    a.click();
+  }
+
+  // ── Clear ─────────────────────────────────────────────────────────────────
+  clearBtn.addEventListener('click', async () => {
+    if (eventSource) eventSource.close();
+    if (currentJobId) {
+      fetch(`/job/${currentJobId}`, { method: 'DELETE' }).catch(() => {});
+      currentJobId = null;
+    }
+    pendingFiles = [];
+    fileList.innerHTML = '';
+    summary.classList.add('hidden');
+    convertBtn.disabled = true;
+    clearBtn.disabled   = true;
+  });
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function formatBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  function formatNum(n) {
+    return n.toLocaleString();
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>
