@@ -11,15 +11,51 @@ A CLI tool (and optional web UI) to convert PDF and DOCX files to Markdown, powe
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.11–3.13 (Python 3.14+ is not yet supported — docling depends on PyTorch/torchvision, which do not have Python 3.14 wheels as of this writing)
 - [pandoc](https://pandoc.org/installing.html) (for DOCX conversion)
 
-Install pandoc on macOS:
+### Installing pandoc
+
+**macOS:**
 ```bash
 brew install pandoc
 ```
 
+**Linux — with Homebrew (recommended for immutable distros like Bazzite / Silverblue):**
+```bash
+brew install pandoc
+```
+
+**Linux — Fedora / RHEL:**
+```bash
+sudo dnf install pandoc
+```
+
+> **Note for immutable Fedora variants** (Bazzite, Silverblue, Kinoite): `dnf install` is not available for ad-hoc packages. Use Homebrew above, or layer with rpm-ostree (`sudo rpm-ostree install pandoc`, then reboot).
+
+**Linux — Debian / Ubuntu:**
+```bash
+sudo apt-get install pandoc
+```
+
+**Linux — Arch:**
+```bash
+sudo pacman -S pandoc
+```
+
+For other platforms, see the [pandoc install page](https://pandoc.org/installing.html).
+
 ## Setup
+
+**Quick setup (recommended):** use the included `install.sh` — it detects your OS, installs pandoc if needed, creates a Python venv, and installs all dependencies:
+
+```bash
+git clone <repo-url>
+cd pdf-to-markdown
+./install.sh
+```
+
+**Manual setup:**
 
 ```bash
 git clone <repo-url>
